@@ -3,13 +3,12 @@ from dash import dcc, html, Input, Output, State
 import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import joblib
 import numpy as np
 from tensorflow.keras.models import load_model
 from pathlib import Path
 
-# === Handle paths safely ===
+# === Handle paths ===
 BASE_DIR = Path(__file__).resolve().parent.parent
 ARTIFACTS_DIR = BASE_DIR / "artifacts"
 DATA_DIR = BASE_DIR / "data"
@@ -20,28 +19,49 @@ model_2 = joblib.load(ARTIFACTS_DIR / "model_2.pkl")
 model_3 = joblib.load(ARTIFACTS_DIR / "model_3.pkl")
 dl_model = load_model(ARTIFACTS_DIR / "model_4.keras")
 scaler = joblib.load(ARTIFACTS_DIR / "scaler.pkl")
+X_columns = joblib.load(ARTIFACTS_DIR / "X_columns.pkl")
 preds_df = pd.read_csv(ARTIFACTS_DIR / "predictions.csv")
 
-# === Load & preprocess training data for reference ===
+# === Load training data for visuals ===
 df = pd.read_csv(DATA_DIR / "train.csv")
 df.drop(columns=[col for col in df.columns if col.endswith("_label")], inplace=True)
-df_encoded = pd.get_dummies(df.drop("GradeClass", axis=1))
-X_columns = df_encoded.columns
 
-# === Helper: Prepare input for models ===
-def preprocess_input(data_dict):
-    df_input = pd.DataFrame([data_dict])
+# === Input preprocessing ===
+def preprocess_input(raw):
+    # Map parental education to string
+    parentaleducation_map = {
+        0: "None",
+        1: "HighSchool",
+        2: "SomeCollege",
+        3: "Bachelors",
+        4: "HigherStudy"
+    }
+    raw["parentaleducation"] = parentaleducation_map.get(raw["parentaleducation"], "None")
+
+    # Create DataFrame
+    df_input = pd.DataFrame([raw])
+
+    # One-hot encode
     df_input = pd.get_dummies(df_input)
+
+    # Ensure all expected columns are present
     for col in X_columns:
         if col not in df_input.columns:
             df_input[col] = 0
-    df_input = df_input[X_columns]
-    return df_input, scaler.transform(df_input)
 
-# === Dash App Setup ===
+    # Reorder columns to match training
+    df_input = df_input[X_columns]
+
+    # Scale numeric features
+    df_scaled = scaler.transform(df_input)
+
+    return df_input, df_scaled
+
+# === Initialize app ===
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 app.title = "Student Grade Prediction App"
 
+# === Layout ===
 app.layout = dbc.Container([
     html.H1("Learner Performance Dashboard", className="text-center mt-4 mb-4"),
 
@@ -66,16 +86,16 @@ app.layout = dbc.Container([
                     dbc.Input(id="studytime", placeholder="Study Time Weekly", type="number"),
                     dbc.Input(id="absences", placeholder="Absences", type="number"),
                     dbc.Select(id="gender", options=[
-                        {"label": "Male", "value": 0},
-                        {"label": "Female", "value": 1}
+                        {"label": "Male", "value": "Male"},
+                        {"label": "Female", "value": "Female"}
                     ], placeholder="Gender"),
                     dbc.Select(id="ethnicity", options=[
-                        {"label": "White", "value": 0},
-                        {"label": "Hispanic", "value": 1},
-                        {"label": "Black", "value": 2},
-                        {"label": "Asian", "value": 3}
+                        {"label": "Caucasian", "value": "Caucasian"},
+                        {"label": "AfricanAmerican", "value": "AfricanAmerican"},
+                        {"label": "Asian", "value": "Asian"},
+                        {"label": "Other", "value": "Other"},
                     ], placeholder="Ethnicity"),
-                    dbc.Input(id="parentaledu", placeholder="Parental Education (0-5)", type="number"),
+                    dbc.Input(id="parentaledu", placeholder="Parental Education (0–4)", type="number"),
                     dbc.Checkbox(id="tutoring", label="Tutoring"),
                     dbc.Checkbox(id="support", label="Parental Support"),
                     dbc.Checkbox(id="extracurricular", label="Extracurricular"),
@@ -93,7 +113,7 @@ app.layout = dbc.Container([
     ])
 ], fluid=True)
 
-# === Update model evaluation graphs ===
+# === Evaluation Graphs ===
 @app.callback(
     Output("accuracy-bar", "figure"),
     Output("confusion-matrix", "figure"),
@@ -119,7 +139,7 @@ def update_graphs(_):
 
     return acc_fig, cm_fig, gpa_fig, study_fig
 
-# === Handle prediction request ===
+# === Prediction Callback ===
 @app.callback(
     Output("prediction-output", "children"),
     Input("predict-btn", "n_clicks"),
@@ -141,27 +161,26 @@ def make_prediction(n_clicks, age, gpa, study, absences, gender, ethnicity, pare
                     tutoring, support, extracurricular, sports, music, volunteering):
     if not n_clicks:
         return ""
-    
-    # === Input validation ===
+
     required_fields = [age, gpa, study, absences, gender, ethnicity, parentaledu]
     if any(v is None for v in required_fields):
         return dbc.Alert("Please fill in all required fields before predicting.", color="warning")
 
     try:
         raw = {
-            "Age": age,
-            "GPA": gpa,
-            "StudyTimeWeekly": study,
-            "Absences": absences,
-            "Gender": gender,
-            "Ethnicity": ethnicity,
-            "ParentalEducation": parentaledu,
-            "Tutoring": int(bool(tutoring)),
-            "Parental Support": int(bool(support)),
-            "Extracurricular": int(bool(extracurricular)),
-            "Sports": int(bool(sports)),
-            "Music": int(bool(music)),
-            "Volunteering": int(bool(volunteering))
+            "age": age,
+            "gpa": gpa,
+            "studytimeweekly": study,
+            "absences": absences,
+            "gender": gender,
+            "ethnicity": ethnicity,
+            "parentaleducation": parentaledu,
+            "tutoring": int(bool(tutoring)),
+            "parental support": int(bool(support)),
+            "extracurricular": int(bool(extracurricular)),
+            "sports": int(bool(sports)),
+            "music": int(bool(music)),
+            "volunteering": int(bool(volunteering)),
         }
 
         input_encoded, input_scaled = preprocess_input(raw)
@@ -174,14 +193,14 @@ def make_prediction(n_clicks, age, gpa, study, absences, gender, ethnicity, pare
         }
 
         return html.Div([
-            html.H4("Predictions:"),
-            html.Ul([html.Li(f"{model}: Grade {preds[model]}") for model in preds])
+            html.H4("Predicted Grades:"),
+            html.Ul([html.Li(f"{model}: Grade {pred}") for model, pred in preds.items()])
         ])
 
     except Exception as e:
         print("Prediction error:", str(e))
         return dbc.Alert(f"An error occurred during prediction: {str(e)}", color="danger")
 
-# === Run the app ===
+# === Run app ===
 if __name__ == '__main__':
     app.run(debug=True)
