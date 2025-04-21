@@ -1,206 +1,114 @@
+# src/web_app.py
+
+import os
 import dash
-from dash import dcc, html, Input, Output, State
-import dash_bootstrap_components as dbc
+from dash import html, dcc, Input, Output, State
 import pandas as pd
-import plotly.express as px
 import joblib
 import numpy as np
 from tensorflow.keras.models import load_model
-from pathlib import Path
+import plotly.express as px
 
-# === Handle paths ===
-BASE_DIR = Path(__file__).resolve().parent.parent
-ARTIFACTS_DIR = BASE_DIR / "artifacts"
-DATA_DIR = BASE_DIR / "data"
+# Absolute path setup
+base_dir = os.path.dirname(os.path.abspath(__file__))
+artifacts_dir = os.path.join(base_dir, "..", "artifacts")
 
-# === Load models & artifacts ===
-model_1 = joblib.load(ARTIFACTS_DIR / "model_1.pkl")
-model_2 = joblib.load(ARTIFACTS_DIR / "model_2.pkl")
-model_3 = joblib.load(ARTIFACTS_DIR / "model_3.pkl")
-dl_model = load_model(ARTIFACTS_DIR / "model_4.keras")
-scaler = joblib.load(ARTIFACTS_DIR / "scaler.pkl")
-X_columns = joblib.load(ARTIFACTS_DIR / "X_columns.pkl")
-preds_df = pd.read_csv(ARTIFACTS_DIR / "predictions.csv")
+# Label map
+grade_labels = {
+    0: "Fail",
+    1: "Pass",
+    2: "Good",
+    3: "Very Good",
+    4: "Excellent"
+}
 
-# === Load training data for visuals ===
-df = pd.read_csv(DATA_DIR / "train.csv")
-df.drop(columns=[col for col in df.columns if col.endswith("_label")], inplace=True)
+# Load models and artifacts
+model_1 = joblib.load(f"{artifacts_dir}/model_1.pkl")
+model_2 = joblib.load(f"{artifacts_dir}/model_2.pkl")
+model_3 = joblib.load(f"{artifacts_dir}/model_3.pkl")
+model_4 = load_model(f"{artifacts_dir}/model_4.keras")
+scaler = joblib.load(f"{artifacts_dir}/scaler.pkl")
+X_columns = joblib.load(f"{artifacts_dir}/X_columns.pkl")
 
-# === Input preprocessing ===
-def preprocess_input(raw):
-    # Map parental education to string
-    parentaleducation_map = {
-        0: "None",
-        1: "HighSchool",
-        2: "SomeCollege",
-        3: "Bachelors",
-        4: "HigherStudy"
-    }
-    raw["parentaleducation"] = parentaleducation_map.get(raw["parentaleducation"], "None")
+# Load predictions.csv for accuracy comparison
+preds_df = pd.read_csv(f"{artifacts_dir}/predictions.csv")
 
-    # Create DataFrame
-    df_input = pd.DataFrame([raw])
+# Initialize Dash app
+app = dash.Dash(__name__, suppress_callback_exceptions=True)
+app.title = "Student Grade Predictor"
 
-    # One-hot encode
-    df_input = pd.get_dummies(df_input)
-
-    # Ensure all expected columns are present
-    for col in X_columns:
-        if col not in df_input.columns:
-            df_input[col] = 0
-
-    # Reorder columns to match training
-    df_input = df_input[X_columns]
-
-    # Scale numeric features
-    df_scaled = scaler.transform(df_input)
-
-    return df_input, df_scaled
-
-# === Initialize app ===
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
-app.title = "Student Grade Prediction App"
-
-# === Layout ===
-app.layout = dbc.Container([
-    html.H1("Learner Performance Dashboard", className="text-center mt-4 mb-4"),
+# App layout
+app.layout = html.Div([
+    html.H1("🎓 Student Grade Prediction Dashboard", style={"textAlign": "center", "color": "#2c3e50"}),
 
     dcc.Tabs([
-        dcc.Tab(label="Model Evaluation", children=[
-            dbc.Row([
-                dbc.Col(dcc.Graph(id="accuracy-bar"), width=6),
-                dbc.Col(dcc.Graph(id="confusion-matrix"), width=6),
-            ]),
-            dbc.Row([
-                dbc.Col(dcc.Graph(id="gpa-vs-grade"), width=6),
-                dbc.Col(dcc.Graph(id="study-vs-grade"), width=6),
-            ])
-        ]),
-        dcc.Tab(label="Make a Prediction", children=[
+        # Visualization Tab
+        dcc.Tab(label="Visualizations", children=[
             html.Br(),
-            dbc.Row([
-                dbc.Col([
-                    html.H5("Enter Student Data"),
-                    dbc.Input(id="age", placeholder="Age", type="number"),
-                    dbc.Input(id="gpa", placeholder="GPA", type="number", step=0.01),
-                    dbc.Input(id="studytime", placeholder="Study Time Weekly", type="number"),
-                    dbc.Input(id="absences", placeholder="Absences", type="number"),
-                    dbc.Select(id="gender", options=[
-                        {"label": "Male", "value": "Male"},
-                        {"label": "Female", "value": "Female"}
-                    ], placeholder="Gender"),
-                    dbc.Select(id="ethnicity", options=[
-                        {"label": "Caucasian", "value": "Caucasian"},
-                        {"label": "AfricanAmerican", "value": "AfricanAmerican"},
-                        {"label": "Asian", "value": "Asian"},
-                        {"label": "Other", "value": "Other"},
-                    ], placeholder="Ethnicity"),
-                    dbc.Input(id="parentaledu", placeholder="Parental Education (0–4)", type="number"),
-                    dbc.Checkbox(id="tutoring", label="Tutoring"),
-                    dbc.Checkbox(id="support", label="Parental Support"),
-                    dbc.Checkbox(id="extracurricular", label="Extracurricular"),
-                    dbc.Checkbox(id="sports", label="Sports"),
-                    dbc.Checkbox(id="music", label="Music"),
-                    dbc.Checkbox(id="volunteering", label="Volunteering"),
-                    html.Br(),
-                    dbc.Button("Predict", id="predict-btn", color="primary"),
-                ], width=4),
-                dbc.Col([
-                    html.Div(id="prediction-output", className="mt-4")
-                ])
-            ])
+            html.H3("Model Accuracy Comparison", style={"textAlign": "center"}),
+            dcc.Graph(
+                figure=px.bar(
+                    preds_df.drop(columns="Actual").apply(lambda col: (preds_df["Actual"] == col).mean(), axis=0).reset_index(),
+                    x="index", y=0,
+                    labels={"index": "Model", "0": "Accuracy"},
+                    color="index",
+                    title="Model Accuracy",
+                    template="plotly_white"
+                )
+            ),
+            html.Br(),
+            html.H4("Confusion Matrix (Deep Learning)", style={"textAlign": "center"}),
+            html.Img(src="/assets/cm_dl.png", style={"maxWidth": "70%", "margin": "0 auto", "display": "block"})
+        ]),
+
+        # Prediction Tab
+        dcc.Tab(label=" Predict Grades", children=[
+            html.Div([
+                html.P("Enter Feature Values:", style={"fontWeight": "bold"}),
+                html.Div([
+                    html.Div([
+                        html.Label(col),
+                        dcc.Input(id=col, type="number", placeholder=col, value=0, style={"width": "100%"})
+                    ], style={"margin": "5px", "flex": "1"}) for col in X_columns
+                ], style={"display": "flex", "flexWrap": "wrap"}),
+
+                html.Button("Predict Grade", id="predict-btn", style={"marginTop": "15px"}),
+                html.Div(id="prediction-output", style={
+                    "marginTop": "25px",
+                    "fontSize": "18px",
+                    "background": "#f9f9f9",
+                    "padding": "15px",
+                    "borderRadius": "8px",
+                    "boxShadow": "0 2px 5px rgba(0, 0, 0, 0.1)"
+                })
+            ], style={"padding": "20px"})
         ])
     ])
-], fluid=True)
+], style={"padding": "20px"})
 
-# === Evaluation Graphs ===
-@app.callback(
-    Output("accuracy-bar", "figure"),
-    Output("confusion-matrix", "figure"),
-    Output("gpa-vs-grade", "figure"),
-    Output("study-vs-grade", "figure"),
-    Input("accuracy-bar", "id")
-)
-def update_graphs(_):
-    accs = {
-        "Logistic Regression": np.mean(preds_df["Actual"] == preds_df["Logistic Regression"]),
-        "Random Forest": np.mean(preds_df["Actual"] == preds_df["Random Forest"]),
-        "XGBoost": np.mean(preds_df["Actual"] == preds_df["XGBoost"]),
-        "Deep Learning": np.mean(preds_df["Actual"] == preds_df["Deep Learning"]),
-    }
 
-    acc_fig = px.bar(x=list(accs.keys()), y=list(accs.values()), labels={"x": "Model", "y": "Accuracy"}, title="Model Accuracy")
-
-    cm = pd.crosstab(preds_df["Actual"], preds_df["Deep Learning"], rownames=['Actual'], colnames=['Predicted'])
-    cm_fig = px.imshow(cm, text_auto=True, title="Confusion Matrix - Deep Learning")
-
-    gpa_fig = px.violin(df, x="GradeClass", y="GPA", box=True, points="all", title="GPA vs GradeClass")
-    study_fig = px.scatter(df, x="StudyTimeWeekly", y="GPA", color="GradeClass", title="Study Time vs GPA")
-
-    return acc_fig, cm_fig, gpa_fig, study_fig
-
-# === Prediction Callback ===
 @app.callback(
     Output("prediction-output", "children"),
     Input("predict-btn", "n_clicks"),
-    State("age", "value"),
-    State("gpa", "value"),
-    State("studytime", "value"),
-    State("absences", "value"),
-    State("gender", "value"),
-    State("ethnicity", "value"),
-    State("parentaledu", "value"),
-    State("tutoring", "value"),
-    State("support", "value"),
-    State("extracurricular", "value"),
-    State("sports", "value"),
-    State("music", "value"),
-    State("volunteering", "value"),
+    [State(col, "value") for col in X_columns]
 )
-def make_prediction(n_clicks, age, gpa, study, absences, gender, ethnicity, parentaledu,
-                    tutoring, support, extracurricular, sports, music, volunteering):
-    if not n_clicks:
+def predict_grade(n_clicks, *input_values):
+    if n_clicks is None:
         return ""
+    
+    input_array = np.array(input_values).reshape(1, -1)
+    input_scaled = scaler.transform(input_array)
 
-    required_fields = [age, gpa, study, absences, gender, ethnicity, parentaledu]
-    if any(v is None for v in required_fields):
-        return dbc.Alert("Please fill in all required fields before predicting.", color="warning")
+    preds = {
+        "Logistic Regression": grade_labels[model_1.predict(input_scaled)[0]],
+        "Random Forest": grade_labels[model_2.predict(input_array)[0]],
+        "XGBoost": grade_labels[model_3.predict(input_array)[0]],
+        "Deep Learning": grade_labels[np.argmax(model_4.predict(input_scaled)[0])]
+    }
 
-    try:
-        raw = {
-            "age": age,
-            "gpa": gpa,
-            "studytimeweekly": study,
-            "absences": absences,
-            "gender": gender,
-            "ethnicity": ethnicity,
-            "parentaleducation": parentaledu,
-            "tutoring": int(bool(tutoring)),
-            "parental support": int(bool(support)),
-            "extracurricular": int(bool(extracurricular)),
-            "sports": int(bool(sports)),
-            "music": int(bool(music)),
-            "volunteering": int(bool(volunteering)),
-        }
+    return html.Ul([
+        html.Li(f"{model}: {grade}", style={"marginBottom": "8px"}) for model, grade in preds.items()
+    ])
 
-        input_encoded, input_scaled = preprocess_input(raw)
-
-        preds = {
-            "Logistic Regression": model_1.predict(input_scaled)[0],
-            "Random Forest": model_2.predict(input_encoded)[0],
-            "XGBoost": model_3.predict(input_encoded)[0],
-            "Deep Learning": int(np.argmax(dl_model.predict(input_scaled), axis=1)[0])
-        }
-
-        return html.Div([
-            html.H4("Predicted Grades:"),
-            html.Ul([html.Li(f"{model}: Grade {pred}") for model, pred in preds.items()])
-        ])
-
-    except Exception as e:
-        print("Prediction error:", str(e))
-        return dbc.Alert(f"An error occurred during prediction: {str(e)}", color="danger")
-
-# === Run app ===
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)

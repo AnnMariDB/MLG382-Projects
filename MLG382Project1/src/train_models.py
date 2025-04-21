@@ -1,93 +1,53 @@
 # src/train_models.py
-
+import os
+import joblib
 import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
-import joblib
-import os
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.utils import to_categorical
 
-# Load raw data
-df = pd.read_csv("../Student_performance_data.csv")
+def train_and_save_models(data_path, artifacts_dir):
+    df = pd.read_csv(data_path)
+    X = df.drop("gradeclass", axis=1)
+    y = df["gradeclass"]
 
-# Map numerical codes to strings for categorical variables
-ethnicity_map = {
-    0: "Caucasian",
-    1: "AfricanAmerican",
-    2: "Asian",
-    3: "Other"
-}
+    # Save feature column names
+    joblib.dump(list(X.columns), os.path.join(artifacts_dir, "X_columns.pkl"))
 
-parentaleducation_map = {
-    0: "None",
-    1: "HighSchool",
-    2: "SomeCollege",
-    3: "Bachelors",
-    4: "HigherStudy"
-}
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-gender_map = {
-    0: "Male",
-    1: "Female"
-}
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    joblib.dump(scaler, os.path.join(artifacts_dir, "scaler.pkl"))
 
-df["ethnicity"] = df["ethnicity"].map(ethnicity_map)
-df["parentaleducation"] = df["parentaleducation"].map(parentaleducation_map)
-df["gender"] = df["gender"].map(gender_map)
+    model_1 = LogisticRegression(max_iter=1000)
+    model_1.fit(X_train_scaled, y_train)
+    joblib.dump(model_1, os.path.join(artifacts_dir, "model_1.pkl"))
 
-# Convert boolean-like to integers (if not already)
-for col in ["tutoring", "parental support", "extracurricular", "sports", "music", "volunteering"]:
-    df[col] = df[col].astype(int)
+    model_2 = RandomForestClassifier(random_state=42)
+    model_2.fit(X_train, y_train)
+    joblib.dump(model_2, os.path.join(artifacts_dir, "model_2.pkl"))
 
-# One-hot encode
-categorical_cols = [
-    "gender", "ethnicity", "parentaleducation",
-    "tutoring", "parental support", "extracurricular", "sports", "music", "volunteering"
-]
+    model_3 = XGBClassifier(use_label_encoder=False, eval_metric='mlogloss', random_state=42)
+    model_3.fit(X_train, y_train)
+    joblib.dump(model_3, os.path.join(artifacts_dir, "model_3.pkl"))
 
-df_encoded = pd.get_dummies(df, columns=categorical_cols, drop_first=False)
+    num_classes = y.nunique()
+    y_train_dl = to_categorical(y_train, num_classes=num_classes)
 
-# Separate features and target
-X = df_encoded.drop(columns=["Grade"])
-y = df_encoded["Grade"]
-
-# Save column order for prediction-time alignment
-artifacts_dir = os.path.join("..", "MLG382Project1", "artifacts")
-os.makedirs(artifacts_dir, exist_ok=True)
-joblib.dump(X.columns.tolist(), os.path.join(artifacts_dir, "X_columns.pkl"))
-
-# Train-test split
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-# Scale numeric features
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
-
-# Save scaler
-joblib.dump(scaler, os.path.join(artifacts_dir, "scaler.pkl"))
-
-# Train and save models
-model_1 = LogisticRegression(max_iter=1000)
-model_1.fit(X_train_scaled, y_train)
-joblib.dump(model_1, os.path.join(artifacts_dir, "model_1.pkl"))
-
-model_2 = RandomForestClassifier(random_state=42)
-model_2.fit(X_train, y_train)
-joblib.dump(model_2, os.path.join(artifacts_dir, "model_2.pkl"))
-
-model_3 = XGBClassifier(use_label_encoder=False, eval_metric='mlogloss', random_state=42)
-model_3.fit(X_train, y_train)
-joblib.dump(model_3, os.path.join(artifacts_dir, "model_3.pkl"))
-
-# Save predictions
-pred_df = pd.DataFrame({
-    "Actual": y_test,
-    "Logistic Regression": model_1.predict(X_test_scaled),
-    "Random Forest": model_2.predict(X_test),
-    "XGBoost": model_3.predict(X_test),
-})
-
-pred_df.to_csv(os.path.join(artifacts_dir, "predictions.csv"), index=False)
+    dl_model = Sequential([
+        Dense(64, activation='relu', input_shape=(X_train.shape[1],)),
+        Dropout(0.3),
+        Dense(32, activation='relu'),
+        Dropout(0.2),
+        Dense(num_classes, activation='softmax')
+    ])
+    dl_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    dl_model.fit(X_train_scaled, y_train_dl, epochs=20, batch_size=32, validation_split=0.2, verbose=0)
+    dl_model.save(os.path.join(artifacts_dir, "model_4.keras"))
