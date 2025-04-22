@@ -1,17 +1,22 @@
-# python src/web_app.py
+# python web_app.py
 import os
+import sys
 import pandas as pd
 import numpy as np
 import joblib
 from dash import Dash, html, dcc, Input, Output, State
 import plotly.express as px
 import dash_bootstrap_components as dbc
+sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 # Paths 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-ARTIFACTS = os.path.join(BASE_DIR, "..", "artifacts")
+#ARTIFACTS = os.path.join(BASE_DIR, "..", "artifacts")
+ARTIFACTS = os.path.join(os.getcwd(), "artifacts")
 
 # Load Artifacts
+print("Looking for scaler at:", os.path.join(ARTIFACTS, "scaler.pkl"))
+
 scaler = joblib.load(os.path.join(ARTIFACTS, "scaler.pkl"))
 feature_names = joblib.load(os.path.join(ARTIFACTS, "feature_names.pkl"))
 label_encoder = joblib.load(os.path.join(ARTIFACTS, "label_encoder.pkl"))
@@ -160,5 +165,6 @@ def predict_rf_only(n_clicks, age, gender, ethnicity, parental_education, study_
 #if __name__ == "__main__":
 #    app.run(debug=True)
 
+# Run Server: Render
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=False)
