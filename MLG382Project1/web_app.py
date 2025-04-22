@@ -1,13 +1,19 @@
 # python web_app.py
+
 import os
 import sys
 import pandas as pd
 import numpy as np
 import joblib
+import dash
 from dash import Dash, html, dcc, Input, Output, State
 import plotly.express as px
 import dash_bootstrap_components as dbc
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+
+app = Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
+server = app.server 
+app.title = "BrightPath Grade Prediction Dashboard"
 
 # Paths 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -89,9 +95,9 @@ def create_input_row(label, id, input_type="text", options=None, default=None):
         ], className="mb-2")
 
 # Dash App Init 
-app = Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
-server = app.server 
-app.title = "BrightPath Grade Prediction Dashboard"
+#app = Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
+#server = app.server 
+#app.title = "BrightPath Grade Prediction Dashboard"
 
 #  Layout
 app.layout = dbc.Container([
@@ -167,5 +173,9 @@ def predict_rf_only(n_clicks, age, gender, ethnicity, parental_education, study_
 #    app.run(debug=True)
 
 # Run Server: Render
+#if __name__ == "__main__":
+#    app.run(host="0.0.0.0", port=8080, debug=False)
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    port = int(os.environ.get("PORT", 8050))  # Default to 8050 for local dev
+    app.run(host="0.0.0.0", port=port, debug=False)
