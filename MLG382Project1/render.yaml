@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: brightpath-grade-predictor
+    name: GroupE_MLG382-Project1
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python src/web_app.py
