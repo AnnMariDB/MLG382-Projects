@@ -90,6 +90,7 @@ def create_input_row(label, id, input_type="text", options=None, default=None):
 
 # Dash App Init 
 app = Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
+server = app.server 
 app.title = "BrightPath Grade Prediction Dashboard"
 
 #  Layout
