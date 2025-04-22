@@ -1,114 +1,161 @@
-# src/web_app.py
-
+# python src/web_app.py
 import os
-import dash
-from dash import html, dcc, Input, Output, State
 import pandas as pd
-import joblib
 import numpy as np
-from tensorflow.keras.models import load_model
+import joblib
+from dash import Dash, html, dcc, Input, Output, State
 import plotly.express as px
+import dash_bootstrap_components as dbc
 
-# Absolute path setup
-base_dir = os.path.dirname(os.path.abspath(__file__))
-artifacts_dir = os.path.join(base_dir, "..", "artifacts")
+# === Paths ===
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ARTIFACTS = os.path.join(BASE_DIR, "..", "artifacts")
 
-# Label map
-grade_labels = {
-    0: "Fail",
-    1: "Pass",
-    2: "Good",
-    3: "Very Good",
-    4: "Excellent"
+# === Load Artifacts ===
+scaler = joblib.load(os.path.join(ARTIFACTS, "scaler.pkl"))
+feature_names = joblib.load(os.path.join(ARTIFACTS, "feature_names.pkl"))
+label_encoder = joblib.load(os.path.join(ARTIFACTS, "label_encoder.pkl"))
+model_rf = joblib.load(os.path.join(ARTIFACTS, "model_rf.pkl"))
+performance_df = pd.read_csv(os.path.join(ARTIFACTS, "model_performance.csv"))
+
+# === Label Mapping ===
+grade_label_map = {0: "Fail", 1: "Pass", 2: "Good", 3: "Excellent"}
+
+# === UI Options ===
+categorical_options = {
+    "Gender": ["Male", "Female"],
+    "Ethnicity": ["Asian", "Black", "Hispanic", "White", "Other"],
+    "ParentalEducation": ["High School", "Bachelor", "Master", "PhD", "None"],
+    "Tutoring": ["Yes", "No"],
+    "ParentalSupport": ["Yes", "No"],
+    "Extracurricular": ["Yes", "No"],
+    "Sports": ["Yes", "No"],
+    "Music": ["Yes", "No"],
+    "Volunteering": ["Yes", "No"]
 }
 
-# Load models and artifacts
-model_1 = joblib.load(f"{artifacts_dir}/model_1.pkl")
-model_2 = joblib.load(f"{artifacts_dir}/model_2.pkl")
-model_3 = joblib.load(f"{artifacts_dir}/model_3.pkl")
-model_4 = load_model(f"{artifacts_dir}/model_4.keras")
-scaler = joblib.load(f"{artifacts_dir}/scaler.pkl")
-X_columns = joblib.load(f"{artifacts_dir}/X_columns.pkl")
+# === Encoding Maps ===
+gender_map = {"Male": 0.0, "Female": 1.0}
+ethnicity_map = {"White": 0.0, "Hispanic": 1.0, "Black": 2.0, "Asian": 3.0, "Other": 4.0}
+parent_edu_map = {"High School": 15.0, "Bachelor": 19.83, "Master": 20.5, "PhD": 21.5, "None": 10.0}
 
-# Load predictions.csv for accuracy comparison
-preds_df = pd.read_csv(f"{artifacts_dir}/predictions.csv")
+# === Preprocessing ===
+def preprocess_user_input(age, gender, ethnicity, parent_edu, study_time, absences,
+                          tutoring, parental_support, extracurricular, sports, music,
+                          volunteering, gpa):
 
-# Initialize Dash app
-app = dash.Dash(__name__, suppress_callback_exceptions=True)
-app.title = "Student Grade Predictor"
+    gender_encoded = gender_map.get(gender, 0.0)
+    ethnicity_encoded = ethnicity_map.get(ethnicity, 0.0)
+    parent_edu_encoded = parent_edu_map.get(parent_edu, 15.0)
+    tutoring = 1.0 if tutoring == "Yes" else 0.0
+    parental_support = 1.0 if parental_support == "Yes" else 0.0
+    extracurricular = 1.0 if extracurricular == "Yes" else 0.0
+    sports = 1.0 if sports == "Yes" else 0.0
+    music = 1.0 if music == "Yes" else 0.0
+    volunteering = 1.0 if volunteering == "Yes" else 0.0
 
-# App layout
-app.layout = html.Div([
-    html.H1("🎓 Student Grade Prediction Dashboard", style={"textAlign": "center", "color": "#2c3e50"}),
+    numeric_scaled = scaler.transform([[study_time, absences, gpa]])
+
+    return np.array([[
+        age, gender_encoded, ethnicity_encoded, parent_edu_encoded,
+        numeric_scaled[0][0],  # study time
+        numeric_scaled[0][1],  # absences
+        tutoring, parental_support, extracurricular,
+        sports, music, volunteering,
+        numeric_scaled[0][2]   # GPA
+    ]])
+
+# === Input Row Builder ===
+def create_input_row(label, id, input_type="text", options=None, default=None):
+    if options:
+        return dbc.Row([
+            dbc.Col(html.Label(label, className="fw-bold"), width=3),
+            dbc.Col(dcc.Dropdown(
+                id=id,
+                options=[{"label": opt, "value": opt} for opt in options],
+                value=default,
+                placeholder=f"Select {label}"
+            ), width=9)
+        ], className="mb-2")
+    else:
+        return dbc.Row([
+            dbc.Col(html.Label(label, className="fw-bold"), width=3),
+            dbc.Col(dcc.Input(id=id, type=input_type, value=default, placeholder=f"Enter {label}", className="form-control"), width=9)
+        ], className="mb-2")
+
+# === Dash App Init ===
+app = Dash(__name__, external_stylesheets=[dbc.themes.FLATLY])
+app.title = "BrightPath Grade Prediction Dashboard"
+
+# === Layout ===
+app.layout = dbc.Container([
+    html.H2("📊 Model Performance Dashboard", className="text-center my-4 fw-bold"),
 
     dcc.Tabs([
-        # Visualization Tab
-        dcc.Tab(label="Visualizations", children=[
-            html.Br(),
-            html.H3("Model Accuracy Comparison", style={"textAlign": "center"}),
-            dcc.Graph(
-                figure=px.bar(
-                    preds_df.drop(columns="Actual").apply(lambda col: (preds_df["Actual"] == col).mean(), axis=0).reset_index(),
-                    x="index", y=0,
-                    labels={"index": "Model", "0": "Accuracy"},
-                    color="index",
-                    title="Model Accuracy",
-                    template="plotly_white"
-                )
-            ),
-            html.Br(),
-            html.H4("Confusion Matrix (Deep Learning)", style={"textAlign": "center"}),
-            html.Img(src="/assets/cm_dl.png", style={"maxWidth": "70%", "margin": "0 auto", "display": "block"})
+        dcc.Tab(label="Model Performance", children=[
+            dcc.Graph(figure=px.bar(performance_df, x="Model", y="Accuracy", text="Accuracy", color="Model")
+                      .update_layout(title="Model Accuracy", yaxis_range=[0, 1])),
+            dcc.Graph(figure=px.bar(performance_df, x="Model", y="Precision", color="Model", title="Precision")),
+            dcc.Graph(figure=px.bar(performance_df, x="Model", y="Recall", color="Model", title="Recall")),
+            dcc.Graph(figure=px.bar(performance_df, x="Model", y="F1", color="Model", title="F1 Score")),
         ]),
 
-        # Prediction Tab
-        dcc.Tab(label=" Predict Grades", children=[
-            html.Div([
-                html.P("Enter Feature Values:", style={"fontWeight": "bold"}),
-                html.Div([
-                    html.Div([
-                        html.Label(col),
-                        dcc.Input(id=col, type="number", placeholder=col, value=0, style={"width": "100%"})
-                    ], style={"margin": "5px", "flex": "1"}) for col in X_columns
-                ], style={"display": "flex", "flexWrap": "wrap"}),
-
-                html.Button("Predict Grade", id="predict-btn", style={"marginTop": "15px"}),
-                html.Div(id="prediction-output", style={
-                    "marginTop": "25px",
-                    "fontSize": "18px",
-                    "background": "#f9f9f9",
-                    "padding": "15px",
-                    "borderRadius": "8px",
-                    "boxShadow": "0 2px 5px rgba(0, 0, 0, 0.1)"
-                })
-            ], style={"padding": "20px"})
+        dcc.Tab(label="Predictions", children=[
+            html.H4("🎓 Predict Learner's Grade", className="my-4 fw-bold"),
+            dbc.Form([
+                create_input_row("Age", "age", "number", default=18),
+                create_input_row("Gender", "gender", options=categorical_options["Gender"], default="Female"),
+                create_input_row("Ethnicity", "ethnicity", options=categorical_options["Ethnicity"], default="White"),
+                create_input_row("ParentalEducation", "parentaleducation", options=categorical_options["ParentalEducation"], default="Bachelor"),
+                create_input_row("Tutoring", "tutoring", options=categorical_options["Tutoring"], default="Yes"),
+                create_input_row("ParentalSupport", "parentalsupport", options=categorical_options["ParentalSupport"], default="Yes"),
+                create_input_row("Extracurricular", "extracurricular", options=categorical_options["Extracurricular"], default="Yes"),
+                create_input_row("Sports", "sports", options=categorical_options["Sports"], default="No"),
+                create_input_row("Music", "music", options=categorical_options["Music"], default="No"),
+                create_input_row("Volunteering", "volunteering", options=categorical_options["Volunteering"], default="No"),
+                create_input_row("StudyTimeWeekly", "studytimeweekly", "number", default=10),
+                create_input_row("Absences", "absences", "number", default=2),
+                create_input_row("GPA", "gpa", "number", default=3.2),
+                dbc.Button("Predict Grade", id="predict-btn", color="primary", className="mt-3 w-100")
+            ]),
+            html.Div(id="prediction-output", className="mt-4 fs-5 fw-bold text-success")
         ])
     ])
-], style={"padding": "20px"})
+], fluid=True)
 
-
+# === Callback ===
 @app.callback(
     Output("prediction-output", "children"),
     Input("predict-btn", "n_clicks"),
-    [State(col, "value") for col in X_columns]
+    [
+        State("age", "value"), State("gender", "value"), State("ethnicity", "value"),
+        State("parentaleducation", "value"), State("studytimeweekly", "value"),
+        State("absences", "value"), State("tutoring", "value"), State("parentalsupport", "value"),
+        State("extracurricular", "value"), State("sports", "value"),
+        State("music", "value"), State("volunteering", "value"), State("gpa", "value")
+    ]
 )
-def predict_grade(n_clicks, *input_values):
-    if n_clicks is None:
+def predict_rf_only(n_clicks, age, gender, ethnicity, parental_education, study_time, absences,
+                    tutoring, parental_support, extracurricular, sports, music, volunteering, gpa):
+    if not n_clicks:
         return ""
     
-    input_array = np.array(input_values).reshape(1, -1)
-    input_scaled = scaler.transform(input_array)
+    X_array = preprocess_user_input(
+        age, gender, ethnicity, parental_education, study_time,
+        absences, tutoring, parental_support, extracurricular,
+        sports, music, volunteering, gpa
+    )
 
-    preds = {
-        "Logistic Regression": grade_labels[model_1.predict(input_scaled)[0]],
-        "Random Forest": grade_labels[model_2.predict(input_array)[0]],
-        "XGBoost": grade_labels[model_3.predict(input_array)[0]],
-        "Deep Learning": grade_labels[np.argmax(model_4.predict(input_scaled)[0])]
-    }
+    X_input = pd.DataFrame(X_array, columns=feature_names)
+    
+    pred = model_rf.predict(X_input)[0]
+    label = grade_label_map.get(int(pred), "Unknown")
 
-    return html.Ul([
-        html.Li(f"{model}: {grade}", style={"marginBottom": "8px"}) for model, grade in preds.items()
+    return html.Div([
+        html.H5("🎯 Predicted Grade using Random Forest:"),
+        html.P(f"{label}", className="text-success fs-4 mt-2")
     ])
 
+# === Run Server ===
 if __name__ == "__main__":
     app.run(debug=True)
