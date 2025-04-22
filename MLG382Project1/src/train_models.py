@@ -88,7 +88,7 @@ dl.save("artifacts/model_dl.keras")
 y_dl_pred = np.argmax(dl.predict(X_val), axis=1)
 results['Deep Learning'] = classification_report(y_val, y_dl_pred, output_dict=True)
 
-# Save performance metrics
+
 perf_df = pd.DataFrame([{
     "Model": model,
     "Accuracy": metrics["accuracy"],
